@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg-dark: #0a0a0a;
+  --bg-charcoal: #0d0d0d;
+  --neon-lime: #a3ff00;
+  --neon-lime-dim: rgba(163, 255, 0, 0.6);
+  --text-white: #ffffff;
+  --text-muted: #808080;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'Rajdhani', system-ui, sans-serif;
+  background: var(--bg-dark);
+  color: var(--text-white);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline background */
+.scanlines {
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.15) 4px
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* Neon glow */
+.neon-glow {
+  box-shadow: 0 0 20px var(--neon-lime-dim), 0 0 40px rgba(163, 255, 0, 0.2);
+}
+
+.neon-glow-hover:hover {
+  box-shadow: 0 0 25px var(--neon-lime-dim), 0 0 50px rgba(163, 255, 0, 0.3);
+}
+
+/* Waveform bars animation */
+@keyframes waveform-pulse {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes waveform-speak {
+  0%, 100% { transform: scaleY(0.4); }
+  25% { transform: scaleY(0.9); }
+  50% { transform: scaleY(0.6); }
+  75% { transform: scaleY(1); }
+}
+
+@keyframes bot-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+@keyframes eye-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+.bot-speaking .waveform-bar {
+  animation: waveform-speak 0.15s ease-in-out infinite;
+}
+
+.bot-idle .waveform-bar {
+  animation: waveform-pulse 2s ease-in-out infinite;
+}
+
+.bot-speaking .bot-image {
+  animation: bot-breathe 0.5s ease-in-out infinite;
+}
+
+.bot-idle .bot-image {
+  animation: bot-breathe 3s ease-in-out infinite;
+}

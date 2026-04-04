@@ -1,0 +1,226 @@
+.bot-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  margin: 2rem 0;
+}
+
+/* Mobile AI bot frame - bigger, right-aligned */
+.bot-container.mobile-bot {
+  margin-left: auto;
+}
+
+.bot-container.mobile-bot .mobile-frame {
+  position: relative;
+  width: 260px;
+  background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
+  border-radius: 32px;
+  padding: 14px;
+  box-shadow:
+    0 0 0 2px rgba(163, 255, 0, 0.15),
+    0 0 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.bot-container.mobile-bot .mobile-notch {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 8px;
+  background: #000;
+  border-radius: 0 0 8px 8px;
+  z-index: 3;
+}
+
+.bot-container.mobile-bot .mobile-screen {
+  position: relative;
+  background: linear-gradient(180deg, #0f1419 0%, #1a1f26 100%);
+  border-radius: 22px;
+  padding: 36px 20px 24px;
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.bot-container.mobile-bot .waveform {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 20px;
+  margin-bottom: 12px;
+  z-index: 1;
+}
+
+.bot-container.mobile-bot .waveform-bar {
+  width: 3px;
+  height: 16px;
+  background: rgba(163, 255, 0, 0.8);
+  border-radius: 2px;
+  transform-origin: center;
+  box-shadow: 0 0 6px rgba(163, 255, 0, 0.4);
+}
+
+.bot-container.mobile-bot .bot-idle .waveform-bar {
+  animation: waveform-pulse 2s ease-in-out infinite;
+}
+
+.bot-container.mobile-bot .bot-speaking .waveform-bar {
+  animation: waveform-speak 0.12s ease-in-out infinite;
+}
+
+.bot-container.mobile-bot .bot-speaking .waveform-bar:nth-child(odd) {
+  animation-delay: 0.06s;
+}
+
+.bot-container.mobile-bot .bot-image-wrapper {
+  position: relative;
+  z-index: 2;
+  margin: 8px 0;
+}
+
+.bot-container.mobile-bot .bot-image {
+  max-width: 160px;
+  height: auto;
+  filter: drop-shadow(0 0 20px rgba(163, 255, 0, 0.25));
+}
+
+.bot-container.mobile-bot .bot-talk-btn {
+  margin-top: 12px;
+  padding: 10px 28px;
+  background: var(--neon-lime);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.bot-container.mobile-bot .bot-talk-btn:hover:not(:disabled) {
+  box-shadow: 0 0 20px var(--neon-lime-dim);
+  transform: scale(1.05);
+}
+
+.bot-container.mobile-bot .bot-talk-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bot-container.mobile-bot .bot-talk-btn:not(:disabled) {
+  cursor: pointer;
+}
+
+.bot-container.mobile-bot .bot-idle .bot-image {
+  animation: bot-breathe 3s ease-in-out infinite;
+}
+
+.bot-container.mobile-bot .bot-speaking .bot-image {
+  animation: bot-breathe 0.5s ease-in-out infinite;
+}
+
+.bot-container.mobile-bot .bot-status {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  transition: color 0.3s;
+}
+
+.bot-container.mobile-bot .bot-status.listening {
+  color: var(--neon-lime);
+  text-shadow: 0 0 8px rgba(163, 255, 0, 0.5);
+}
+
+/* Fallback for non-mobile layout */
+.waveform {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform: translate(-50%, 50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  z-index: 1;
+}
+
+.waveform-bar {
+  width: 4px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 2px;
+  transform-origin: center;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.bot-idle .waveform-bar {
+  animation: waveform-pulse 2s ease-in-out infinite;
+}
+
+.bot-speaking .waveform-bar {
+  animation: waveform-speak 0.12s ease-in-out infinite;
+}
+
+.bot-speaking .waveform-bar:nth-child(odd) {
+  animation-delay: 0.06s;
+}
+
+.bot-image-wrapper {
+  position: relative;
+  z-index: 2;
+}
+
+.bot-image {
+  max-width: 280px;
+  height: auto;
+  filter: drop-shadow(0 0 30px rgba(163, 255, 0, 0.2));
+}
+
+.bot-idle .bot-image {
+  animation: bot-breathe 3s ease-in-out infinite;
+}
+
+.bot-speaking .bot-image {
+  animation: bot-breathe 0.5s ease-in-out infinite;
+}
+
+@media (min-width: 768px) {
+  .bot-container.mobile-bot .mobile-frame {
+    width: 300px;
+  }
+
+  .bot-container.mobile-bot .mobile-screen {
+    min-height: 400px;
+    padding: 40px 24px 28px;
+  }
+
+  .bot-container.mobile-bot .bot-image {
+    max-width: 200px;
+  }
+
+  .bot-container.mobile-bot .waveform-bar {
+    width: 4px;
+    height: 22px;
+  }
+
+  .bot-container.mobile-bot .bot-talk-btn {
+    padding: 12px 32px;
+    font-size: 0.9rem;
+  }
+}
