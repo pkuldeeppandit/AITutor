@@ -63,7 +63,28 @@ To use another model, change `OLLamaLLMService.Settings(model="...")` in `backen
 
 The repo is set up to use:
 
-- **Whisper (fallback):** `models/faster-whisper-base/` (already present in this project for offline STT)
+- **Whisper (fallback):** `models/faster-whisper-base/` — **not committed** (see `.gitignore`); download the CTranslate2 **base** weights from Hugging Face ([Systran/faster-whisper-base](https://huggingface.co/Systran/faster-whisper-base)), which includes `model.bin` and the small config/tokenizer files.
+
+From the **repository root**, with your venv active (after `pip install -r requirements.txt`, which pulls in `huggingface_hub`):
+
+```bash
+hf download Systran/faster-whisper-base --local-dir models/faster-whisper-base
+```
+
+On older installs you may only have the legacy entry point:
+
+```bash
+huggingface-cli download Systran/faster-whisper-base --local-dir models/faster-whisper-base
+```
+
+Pure Python (no CLI on `PATH`):
+
+```bash
+python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Systran/faster-whisper-base', local_dir='models/faster-whisper-base')"
+```
+
+If the folder is missing, `bot.py` still runs: faster-whisper falls back to downloading a small model at runtime. Keeping `models/faster-whisper-base` locally avoids that download and matches the **base** model path in code.
+
 - **Piper voice:** `voices/en_US-amy-medium.onnx` (+ `.json` sidecar if present)
 
 If you add another Piper voice, put it under `voices/` and update `PiperTTSService.Settings(voice="...")` in `backend/app/bot.py`.
