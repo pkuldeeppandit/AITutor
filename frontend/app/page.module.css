@@ -1,3 +1,32 @@
+/* Full-page shell for the WebRTC voice agent */
+.voiceAppMain {
+  min-height: 100vh;
+  margin: 0;
+  padding: clamp(20px, 4vw, 40px) clamp(16px, 3vw, 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.voiceAppMain::before {
+  content: "";
+  position: fixed;
+  inset: -40%;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -10%, rgba(163, 255, 0, 0.14), transparent 55%),
+    radial-gradient(ellipse 60% 45% at 100% 50%, rgba(120, 200, 255, 0.06), transparent 45%),
+    radial-gradient(ellipse 50% 40% at 0% 80%, rgba(180, 100, 255, 0.05), transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.voiceAppMain > * {
+  position: relative;
+  z-index: 1;
+}
+
 .landingPage {
   min-height: 100vh;
   background: var(--bg-charcoal);

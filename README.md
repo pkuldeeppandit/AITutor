@@ -1,56 +1,144 @@
-# Voice AI Tutor (STT → LLM → TTS)
+# AI Tutor — local voice tutor (WebRTC + Pipecat)
 
-This project is a local, end-to-end **voice AI tutor** with:
+The app runs a **real-time voice session** in the browser: your microphone goes to the backend over **WebRTC**, a **Pipecat** pipeline does **VAD → speech-to-text → LLM → TTS**, and audio plays back on the same connection.
 
-- **Audio → Text (STT)**: OpenAI **Whisper** (`small`, same as `voice_agent.py`)
-- **Text → Response (LLM)**: **Ollama** (`llama3.2` by default)
-- **Text → Audio (TTS)**: macOS **`say`** (rate 185) with **pyttsx3** fallback
+Stack in `backend/app/bot.py`:
 
-It provides:
+| Stage | Default |
+|--------|---------|
+| Transport | Small WebRTC (`POST /offer`) |
+| VAD | Silero (via Pipecat) |
+| STT | **MLX Whisper** on Apple Silicon if `mlx_whisper` is installed; otherwise **faster-whisper** using `models/faster-whisper-base` if present, or a bundled small model |
+| LLM | **Ollama** OpenAI-compatible API (`mistral` by default) |
+| TTS | **Piper** (`en_US-amy-medium`), files under `voices/` |
 
-- A **FastAPI backend** (`backend/`) exposing `/api/stt`, `/api/chat`, `/api/tts`, `/api/tutor`.
-- A **Next.js frontend** (`frontend/`) to record audio, get a response, and play the spoken reply.
+The **Next.js** UI (`frontend/`) connects to the API base from `NEXT_PUBLIC_API_BASE` for signaling.
 
-## Prereqs
+---
 
-- Python **3.10+**
-- **[Ollama](https://ollama.com/)** running locally, with `llama3.2` pulled: `ollama pull llama3.2`
-- (Recommended) macOS with Apple Silicon or a machine with NVIDIA GPU for faster Whisper
+## Prerequisites
 
-## Setup
+- **Python 3.10–3.13** (required today: Pipecat pulls **numba**, which does not support **Python 3.14** yet)
+- **Node.js 18+** and npm
+- **[Ollama](https://ollama.com/)** installed and running (`ollama serve`), with the chat model pulled (see below)
+- **Microphone** and **speakers/headphones**
+- **macOS Apple Silicon** is ideal for the optional MLX Whisper path; other platforms still work with faster-whisper
+
+---
+
+## 1. Clone and Python environment
+
+From the repository root:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -U pip
 pip install -r requirements.txt
 ```
 
-## Run backend (FastAPI)
+**Optional (Apple Silicon, faster / native STT):**
+
+```bash
+pip install mlx-whisper
+```
+
+Pipecat will prefer MLX Whisper when that import succeeds; otherwise it uses faster-whisper as in `backend/app/bot.py`.
+
+---
+
+## 2. Ollama model
+
+The pipeline expects Ollama at `http://localhost:11434/v1` and uses the **`mistral`** tag by default. Pull it once:
+
+```bash
+ollama pull mistral
+```
+
+To use another model, change `OLLamaLLMService.Settings(model="...")` in `backend/app/bot.py` and pull that tag with Ollama.
+
+---
+
+## 3. Local assets (STT / TTS)
+
+The repo is set up to use:
+
+- **Whisper (fallback):** `models/faster-whisper-base/` (already present in this project for offline STT)
+- **Piper voice:** `voices/en_US-amy-medium.onnx` (+ `.json` sidecar if present)
+
+If you add another Piper voice, put it under `voices/` and update `PiperTTSService.Settings(voice="...")` in `backend/app/bot.py`.
+
+---
+
+## 4. Run the backend
+
+From the **repository root** (so paths like `models/` and `voices/` resolve):
+
+```bash
+source .venv/bin/activate
+python run.py
+```
+
+This serves FastAPI on **http://0.0.0.0:8000** with reload. Endpoints used by the app include:
+
+- `POST /offer` — WebRTC signaling
+- `DELETE /connection/{pc_id}` — teardown (when the client has a `pc_id`)
+
+You can also run:
 
 ```bash
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Run frontend (Next.js)
+---
 
-In another terminal:
+## 5. Run the frontend
 
 ```bash
 cd frontend
 npm install
+cp .env.local.example .env.local # optional; defaults match local backend
 npm run dev
 ```
 
-Open the UI at:
+Open **http://localhost:3000**, click **Start session**, and allow the microphone.
 
-- `http://localhost:3000`
+`frontend/.env.local.example` sets:
 
-## Notes
+```bash
+NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
+```
 
-- **Live STT (WebSocket)** connects from the browser **straight to FastAPI** on port **8000** (`/ws/stt`). HTTP calls like `/api/tutor` go through Next.js and use `API_BASE` on the server. If you see `WebSocket STT failed`, start the backend (`python run.py`) and add `frontend/.env.local` from `frontend/.env.local.example` (then restart `npm run dev`).
-- First STT run downloads the Whisper **small** checkpoint (via the `openai-whisper` package).
-- Optional Hugging Face adapters (`backend/app/llm.py`, `stt.py`, `tts.py`) remain in the repo if you want to swap providers back in `providers.py`.
-- Live transcript uses **WebSocket streaming** to `ws://<your-mac-ip>:8000/ws/stt`. If you open the UI from another device, make sure the backend is started with `--host 0.0.0.0` so it’s reachable on your LAN.
-- Tutor/tts calls still go through the frontend’s HTTP proxy routes.
+If the UI and API run on different hosts or ports, set `NEXT_PUBLIC_API_BASE` to the backend origin (no trailing slash) and restart `npm run dev`.
 
+---
+
+## 6. Quick checklist
+
+| Step | Check |
+|------|--------|
+| Backend | `python run.py` with no import errors |
+| Ollama | `ollama list` shows `mistral` (or your chosen model) |
+| CORS | Backend allows `http://localhost:3000` (already in `backend/app/main.py`) |
+| Browser | HTTPS or `localhost` for `getUserMedia` |
+| Paths | Run backend from repo root so `models/` and `voices/` are found |
+
+---
+
+## Troubleshooting
+
+- **`pip install` fails on Python 3.14** — Use **Python 3.13 or older** (see Pipecat / numba constraints), e.g. `brew install python@3.13` and recreate `.venv` with that interpreter.
+- **“Could not reach backend”** — Start the API on port 8000 and confirm `NEXT_PUBLIC_API_BASE` matches.
+- **Signaling / 500 on `/offer`** — Check the terminal running `run.py` for Pipecat or WebRTC errors; ensure Pipecat extras installed (`pip install -r requirements.txt`).
+- **No speech recognition** — Install `mlx-whisper` on Apple Silicon, or ensure `models/faster-whisper-base` exists and `faster-whisper` installed.
+- **LLM errors** — Run `ollama serve` and verify `ollama pull` for the model name used in `bot.py`.
+- **TTS errors** — Confirm `voices/en_US-amy-medium.onnx` (and Piper dependencies from Pipecat) are present.
+
+---
+
+## Project layout
+
+- `backend/app/main.py` — FastAPI app, CORS, WebRTC offer handler
+- `backend/app/bot.py` — Pipecat pipeline (STT / LLM / TTS)
+- `frontend/` — Next.js UI (`Conversation.tsx` WebRTC client)
+- `run.py` — Convenience entrypoint for uvicorn

@@ -1,196 +1,87 @@
-from __future__ import annotations
-
-import anyio
-import base64
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+# server.py
+import asyncio
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from backend.app.bot import run_bot
 
-from .config import settings
-from .chat_types import ChatTurn
-from .pipecat_voice_agent import run_voice_agent_from_wav_bytes
-from .prompts import TUTOR_SYSTEM_PROMPT
-from .schemas import ChatRequest, ChatResponse, TutorResponse
-from .providers import get_llm, get_stt, get_tts
-
-
-async def _ws_send_json_safe(ws: WebSocket, payload: dict) -> bool:
-    """Send JSON if the client is still connected; return False if they dropped."""
-    try:
-        await ws.send_json(payload)
-        return True
-    except WebSocketDisconnect:
-        return False
-    except RuntimeError as e:
-        # Starlette: "Cannot call \"send\" once a close message has been sent."
-        if "close message" in str(e).lower() or "disconnect" in str(e).lower():
-            return False
-        raise
-
-
-app = FastAPI(title="Voice AI Tutor")
-
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=[
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3001",
+        "http://localhost:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+pcs: dict[str, SmallWebRTCConnection] = {}
+
+
+@app.post("/offer")
+async def offer(request: Request):
+    data = await request.json()
+    sdp = data.get("sdp")
+    sdp_type = data.get("type")
+    if not sdp or not sdp_type:
+        raise HTTPException(status_code=400, detail="Missing WebRTC offer 'sdp' or 'type'.")
+
+    conn = SmallWebRTCConnection()
+    pcs[conn.pc_id] = conn
+    await conn.initialize(sdp=sdp, type=sdp_type)
+    answer = conn.get_answer()
+    if not answer:
+        raise HTTPException(status_code=500, detail="Failed to generate WebRTC answer.")
+    asyncio.create_task(run_bot(conn))
+    return answer
+
+
+@app.delete("/connection/{pc_id}")
+async def close(pc_id: str):
+    if pc_id in pcs:
+        await pcs[pc_id].close()
+        del pcs[pc_id]
 
 
 @app.get("/", response_class=HTMLResponse)
-def root() -> str:
+async def index():
     return """
     <html>
-      <head><title>Voice AI Tutor API</title></head>
-      <body style="font-family: ui-sans-serif, system-ui; padding: 24px;">
-        <h2>Voice AI Tutor backend is running</h2>
-        <p>Run the Next.js frontend in <code>frontend/</code> and open <code>http://localhost:3000</code>.</p>
-      </body>
+    <head><title>Voice Agent</title></head>
+    <body style="font-family:sans-serif;max-width:400px;margin:80px auto;text-align:center">
+      <h2>🎙️ Local Voice Agent</h2>
+      <button id="btn" onclick="start()"
+        style="padding:16px 32px;font-size:18px;border-radius:8px;cursor:pointer">
+        Start Talking
+      </button>
+      <p id="status" style="color:#666">Idle</p>
+      <script>
+        let pc;
+        async function start() {
+          document.getElementById('status').innerText = 'Connecting...';
+          pc = new RTCPeerConnection();
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(t => pc.addTrack(t, stream));
+          const audio = document.createElement('audio');
+          audio.autoplay = true;
+          pc.ontrack = e => { audio.srcObject = e.streams[0]; };
+          document.body.appendChild(audio);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          const res = await fetch('/offer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
+          });
+          const answer = await res.json();
+          await pc.setRemoteDescription(answer);
+          document.getElementById('status').innerText = '🟢 Connected — speak now!';
+        }
+      </script>
+    </body>
     </html>
     """
-
-
-@app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
-    llm = get_llm()
-    messages = [
-        ChatTurn(role="system", content=TUTOR_SYSTEM_PROMPT),
-        ChatTurn(role="user", content=req.text),
-    ]
-    response = llm.generate(messages)
-    return ChatResponse(response=response)
-
-
-@app.post("/api/stt")
-async def stt(audio: UploadFile = File(...)):
-    try:
-        wav_bytes = await audio.read()
-        result = await anyio.to_thread.run_sync(get_stt().transcribe_wav_bytes, wav_bytes)
-        return {"text": result.text}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.websocket("/ws/stt")
-async def ws_stt(ws: WebSocket):
-    """
-    Streaming STT over WebSocket.
-    Client sends binary messages containing WAV bytes (small chunks).
-    Server responds with JSON messages: {"type":"partial","text":"..."} or {"type":"error","detail":"..."}.
-    """
-    await ws.accept()
-    try:
-        while True:
-            wav_bytes = await ws.receive_bytes()
-            try:
-                result = await anyio.to_thread.run_sync(get_stt().transcribe_wav_bytes, wav_bytes)
-                if not await _ws_send_json_safe(ws, {"type": "partial", "text": result.text}):
-                    return
-            except WebSocketDisconnect:
-                return
-            except Exception as e:
-                if not await _ws_send_json_safe(ws, {"type": "error", "detail": str(e)}):
-                    return
-    except WebSocketDisconnect:
-        return
-
-
-@app.post("/api/tts")
-async def tts(req: ChatRequest):
-    try:
-        out = get_tts().synthesize(req.text)
-        return Response(content=out.wav_bytes, media_type="audio/wav")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/tutor", response_model=TutorResponse)
-async def tutor(audio: UploadFile = File(...)) -> TutorResponse:
-    try:
-        wav_bytes = await audio.read()
-        result = await run_voice_agent_from_wav_bytes(wav_bytes, include_tts=False)
-        return TutorResponse(transcript=result.transcript, response=result.response_text)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/tutor_audio")
-async def tutor_audio(audio: UploadFile = File(...)):
-    """
-    Convenience endpoint: audio in → WAV out.
-    The text transcript/response are returned in headers for quick prototyping.
-    """
-    try:
-        wav_bytes = await audio.read()
-        result = await run_voice_agent_from_wav_bytes(wav_bytes, include_tts=True)
-        if result.wav_bytes is None:
-            raise RuntimeError("Pipecat voice agent returned no wav_bytes.")
-
-        res = Response(content=result.wav_bytes, media_type="audio/wav")
-        res.headers["x-transcript"] = result.transcript[:2000]
-        res.headers["x-response-text"] = result.response_text[:2000]
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.websocket("/ws/tutor")
-async def ws_tutor(ws: WebSocket):
-    """
-    Continuous speak-to-speak conversation over WebSocket.
-
-    Protocol:
-    - Client connects.
-    - Client sends BINARY frames: each is a complete WAV recording of one user turn.
-    - Client may send TEXT frame "stop" to end the session gracefully.
-    - Server replies with JSON after processing each turn:
-        {
-          "type": "result",
-          "transcript": "<what user said>",
-          "response": "<tutor reply text>",
-          "audio_b64": "<base64 WAV of TTS audio>"
-        }
-    - On error: {"type": "error", "detail": "<msg>"}
-    """
-    await ws.accept()
-    try:
-        while True:
-            msg = await ws.receive()
-
-            # Text frame — check for stop command
-            if "text" in msg and msg["text"]:
-                if msg["text"].strip().lower() == "stop":
-                    await _ws_send_json_safe(ws, {"type": "stopped"})
-                    break
-                continue
-
-            # Binary frame — one user turn (WAV audio)
-            wav_bytes: bytes = msg.get("bytes") or b""
-            if not wav_bytes:
-                continue
-
-            try:
-                result = await run_voice_agent_from_wav_bytes(wav_bytes, include_tts=True)
-                audio_b64 = (
-                    base64.b64encode(result.wav_bytes).decode()
-                    if result.wav_bytes
-                    else ""
-                )
-                payload = {
-                    "type": "result",
-                    "transcript": result.transcript,
-                    "response": result.response_text,
-                    "audio_b64": audio_b64,
-                }
-                if not await _ws_send_json_safe(ws, payload):
-                    return
-            except WebSocketDisconnect:
-                return
-            except Exception as e:
-                if not await _ws_send_json_safe(ws, {"type": "error", "detail": str(e)}):
-                    return
-
-    except WebSocketDisconnect:
-        return

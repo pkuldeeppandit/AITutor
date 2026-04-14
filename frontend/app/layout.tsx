@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "AI Voice Agents",
-  description: "The All-In-One Platform For Voice AI Agents And Everything Audio"
+  title: "Speech-to-Speech Tutor",
+  description: "Voice in, voice out — WebRTC to local FastAPI / Pipecat"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

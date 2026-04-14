@@ -3,192 +3,82 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import styles from "./Conversation.module.css";
 
-type ChatMessage = {
-    role: "user" | "tutor";
-    text: string;
-};
-
-function getWsTutorUrl(): string {
-    const wsExplicit = process.env.NEXT_PUBLIC_WS_BASE?.trim();
-    if (wsExplicit) return new URL("/ws/tutor", wsExplicit).toString();
-
-    const apiBase = process.env.NEXT_PUBLIC_API_BASE?.trim();
-    if (apiBase) {
-        try {
-            const u = new URL(apiBase);
-            const wsProto = u.protocol === "https:" ? "wss:" : "ws:";
-            return `${wsProto}//${u.host}/ws/tutor`;
-        } catch { /* fall through */ }
-    }
-
-    if (typeof window === "undefined") return "ws://127.0.0.1:8000/ws/tutor";
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${window.location.hostname}:8000/ws/tutor`;
-}
-
-function encodeWavFromFloat32Mono(samples: Float32Array, sampleRate: number): Uint8Array {
-    const numChannels = 1;
-    const bytesPerSample = 2;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = samples.length * bytesPerSample;
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-
-    const writeAscii = (offset: number, s: string) => {
-        for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
-    };
-
-    writeAscii(0, "RIFF");
-    view.setUint32(4, 36 + dataSize, true);
-    writeAscii(8, "WAVE");
-    writeAscii(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, 16, true);
-    writeAscii(36, "data");
-    view.setUint32(40, dataSize, true);
-
-    let o = 44;
-    for (let i = 0; i < samples.length; i++) {
-        const s = Math.max(-1, Math.min(1, samples[i]));
-        view.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-        o += 2;
-    }
-    return new Uint8Array(buffer);
-}
-
-function b64ToWavUrl(b64: string): string {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const blob = new Blob([bytes], { type: "audio/wav" });
-    return URL.createObjectURL(blob);
+function getApiBase(): string {
+    const raw = process.env.NEXT_PUBLIC_API_BASE?.trim();
+    if (raw) return raw.replace(/\/$/, "");
+    if (typeof window === "undefined") return "http://127.0.0.1:8000";
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:8000`;
 }
 
 export default function Conversation() {
     const [isActive, setIsActive] = useState(false);
-    const [isRecording, setIsRecording] = useState(false);
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [isTutorSpeaking, setIsTutorSpeaking] = useState(false);
     const [status, setStatus] = useState("");
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-    const wsRef = useRef<WebSocket | null>(null);
-    const audioCtxRef = useRef<AudioContext | null>(null);
+    const pcRef = useRef<RTCPeerConnection | null>(null);
+    const pcIdRef = useRef<string | null>(null);
     const micStreamRef = useRef<MediaStream | null>(null);
-    const processorRef = useRef<ScriptProcessorNode | null>(null);
-    const pcmRef = useRef<Float32Array[]>([]);
-    const sampleRateRef = useRef<number>(16000);
-    const chatEndRef = useRef<HTMLDivElement | null>(null);
-    const currentAudioUrlRef = useRef<string | null>(null);
+    const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+    const sessionActiveRef = useRef(false);
 
-    // Auto-scroll chat to bottom
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
+    const isConnecting = status.startsWith("Connecting");
+    const isError =
+        status.includes("denied") ||
+        status.includes("failed") ||
+        status.includes("Could not") ||
+        status.includes("lost") ||
+        status.includes("Invalid") ||
+        status.includes("reach backend");
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => { stopEverything(); };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+    const teardownLocal = useCallback(() => {
+        sessionActiveRef.current = false;
+        try {
+            pcRef.current?.close();
+        } catch { /* */ }
+        pcRef.current = null;
+        pcIdRef.current = null;
+        try {
+            micStreamRef.current?.getTracks().forEach((t) => t.stop());
+        } catch { /* */ }
+        micStreamRef.current = null;
+        const el = remoteAudioRef.current;
+        if (el) {
+            el.srcObject = null;
+            el.remove();
+            remoteAudioRef.current = null;
+        }
     }, []);
 
-    function stopEverything() {
-        try { processorRef.current?.disconnect(); processorRef.current = null; } catch { /* */ }
-        try { audioCtxRef.current?.close(); audioCtxRef.current = null; } catch { /* */ }
-        try { micStreamRef.current?.getTracks().forEach(t => t.stop()); micStreamRef.current = null; } catch { /* */ }
-        try { wsRef.current?.send("stop"); wsRef.current?.close(); wsRef.current = null; } catch { /* */ }
-        if (currentAudioUrlRef.current) {
-            URL.revokeObjectURL(currentAudioUrlRef.current);
-            currentAudioUrlRef.current = null;
+    useEffect(() => {
+        return () => {
+            void (async () => {
+                const id = pcIdRef.current;
+                const api = getApiBase();
+                if (id) {
+                    try {
+                        await fetch(`${api}/connection/${id}`, { method: "DELETE" });
+                    } catch { /* */ }
+                }
+                teardownLocal();
+            })();
+        };
+    }, [teardownLocal]);
+
+    const endConversation = useCallback(async () => {
+        const id = pcIdRef.current;
+        const api = getApiBase();
+        if (id) {
+            try {
+                await fetch(`${api}/connection/${id}`, { method: "DELETE" });
+            } catch { /* */ }
         }
-    }
+        teardownLocal();
+        setIsActive(false);
+        setStatus("Session ended.");
+    }, [teardownLocal]);
 
     const startConversation = useCallback(async () => {
-        setMessages([]);
-        setStatus("Connecting to tutor…");
-
-        const wsUrl = getWsTutorUrl();
-        const ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-
-        ws.onopen = () => {
-            setIsActive(true);
-            setStatus("Connected! Hold 🎤 to speak, release to send.");
-        };
-
-        ws.onmessage = async (evt) => {
-            try {
-                const data = JSON.parse(String(evt.data)) as {
-                    type: string; transcript?: string; response?: string; audio_b64?: string; detail?: string;
-                };
-
-                if (data.type === "result") {
-                    if (data.transcript) {
-                        setMessages(prev => [...prev, { role: "user", text: data.transcript! }]);
-                    }
-                    if (data.response) {
-                        setMessages(prev => [...prev, { role: "tutor", text: data.response! }]);
-                    }
-
-                    // Play TTS audio
-                    if (data.audio_b64) {
-                        setIsProcessing(false);
-                        setIsTutorSpeaking(true);
-                        const url = b64ToWavUrl(data.audio_b64);
-                        if (currentAudioUrlRef.current) URL.revokeObjectURL(currentAudioUrlRef.current);
-                        currentAudioUrlRef.current = url;
-
-                        const audio = new Audio(url);
-                        audio.onended = () => { setIsTutorSpeaking(false); setStatus("Hold 🎤 to speak."); };
-                        audio.onerror = () => { setIsTutorSpeaking(false); setStatus("Audio playback error. Hold 🎤 to speak."); };
-                        await audio.play().catch(() => {
-                            setIsTutorSpeaking(false);
-                            setStatus("Click here first to enable audio, then hold 🎤 to speak.");
-                        });
-                    } else {
-                        setIsProcessing(false);
-                        setStatus("Hold 🎤 to speak.");
-                    }
-                } else if (data.type === "error") {
-                    setIsProcessing(false);
-                    setStatus(`Error: ${data.detail}`);
-                } else if (data.type === "stopped") {
-                    setIsActive(false);
-                    setStatus("Conversation ended.");
-                }
-            } catch { /* ignore parse errors */ }
-        };
-
-        ws.onerror = () => {
-            setStatus(`WebSocket failed — is the backend running? (${wsUrl})`);
-            setIsActive(false);
-        };
-
-        ws.onclose = () => {
-            if (isActive) { setStatus("Disconnected."); setIsActive(false); }
-        };
-
-        wsRef.current = ws;
-    }, [isActive]);
-
-    const endConversation = useCallback(() => {
-        stopEverything();
-        setIsActive(false);
-        setIsRecording(false);
-        setIsProcessing(false);
-        setIsTutorSpeaking(false);
-        setStatus("Conversation ended.");
-    }, []);
-
-    // Push-to-talk: START recording on pointerdown
-    const startRecording = useCallback(async () => {
-        if (!isActive || isProcessing || isTutorSpeaking) return;
+        setStatus("Connecting…");
 
         let stream: MediaStream;
         try {
@@ -199,147 +89,165 @@ export default function Conversation() {
         }
         micStreamRef.current = stream;
 
-        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        const audioCtx = new AudioContextClass({ sampleRate: 16000 });
-        audioCtxRef.current = audioCtx;
-        sampleRateRef.current = audioCtx.sampleRate;
-        await audioCtx.resume().catch(() => { /* */ });
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+        pcRef.current = pc;
 
-        const source = audioCtx.createMediaStreamSource(stream);
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
-        pcmRef.current = [];
+        stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
-        processor.onaudioprocess = (e) => {
-            const frame = new Float32Array(e.inputBuffer.getChannelData(0));
-            pcmRef.current.push(frame);
+        const remoteAudio = document.createElement("audio");
+        remoteAudio.autoplay = true;
+        remoteAudio.setAttribute("playsinline", "true");
+        remoteAudio.style.display = "none";
+        document.body.appendChild(remoteAudio);
+        remoteAudioRef.current = remoteAudio;
+
+        pc.ontrack = (e) => {
+            remoteAudio.srcObject = e.streams[0];
+            void remoteAudio.play().catch(() => { /* */ });
         };
 
-        const silent = audioCtx.createGain();
-        silent.gain.value = 0;
-        source.connect(processor);
-        processor.connect(silent);
-        silent.connect(audioCtx.destination);
+        pc.onconnectionstatechange = () => {
+            const s = pc.connectionState;
+            if (s === "failed" || s === "disconnected" || s === "closed") {
+                if (sessionActiveRef.current) {
+                    setStatus("Connection lost.");
+                    setIsActive(false);
+                    teardownLocal();
+                }
+            }
+        };
 
-        setIsRecording(true);
-        setStatus("🔴 Recording… release to send");
-    }, [isActive, isProcessing, isTutorSpeaking]);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
 
-    // Push-to-talk: STOP recording on pointerup/leave
-    const stopRecordingAndSend = useCallback(async () => {
-        if (!isRecording) return;
-        setIsRecording(false);
-        setIsProcessing(true);
-        setStatus("⏳ Tutor is thinking…");
-
-        try { processorRef.current?.disconnect(); processorRef.current = null; } catch { /* */ }
-        try { audioCtxRef.current?.close(); audioCtxRef.current = null; } catch { /* */ }
-        try { micStreamRef.current?.getTracks().forEach(t => t.stop()); micStreamRef.current = null; } catch { /* */ }
-
-        const chunks = pcmRef.current;
-        pcmRef.current = [];
-        const total = chunks.reduce((n, a) => n + a.length, 0);
-        if (total < 1600) { // < 0.1s at 16kHz — too short
-            setIsProcessing(false);
-            setStatus("Too short, try again. Hold 🎤 to speak.");
+        const api = getApiBase();
+        let res: Response;
+        try {
+            res = await fetch(`${api}/offer`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
+            });
+        } catch {
+            teardownLocal();
+            setStatus(`Could not reach backend — is it running? (${api})`);
             return;
         }
 
-        const merged = new Float32Array(total);
-        let o = 0;
-        for (const a of chunks) { merged.set(a, o); o += a.length; }
-
-        const wavBytes = encodeWavFromFloat32Mono(merged, sampleRateRef.current);
-
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            setIsProcessing(false);
-            setStatus("WebSocket not connected. Please start a new conversation.");
+        if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            teardownLocal();
+            setStatus(`Signaling failed (${res.status})${detail ? `: ${detail}` : ""}`);
             return;
         }
-        ws.send(wavBytes);
-    }, [isRecording]);
+
+        const data = (await res.json()) as { sdp?: string; type?: RTCSdpType; pc_id?: string };
+        const { pc_id, sdp, type } = data;
+        if (!sdp || !type) {
+            teardownLocal();
+            setStatus("Invalid answer from server.");
+            return;
+        }
+
+        pcIdRef.current = pc_id ?? null;
+        try {
+            await pc.setRemoteDescription({ sdp, type });
+        } catch {
+            teardownLocal();
+            setStatus("Could not apply remote WebRTC answer.");
+            return;
+        }
+
+        sessionActiveRef.current = true;
+        setIsActive(true);
+        setStatus("Live — speak naturally. Audio plays through your speakers.");
+    }, [teardownLocal]);
 
     return (
-        <section className={styles.convSection}>
-            <div className={styles.convHeader}>
-                <h2 className={styles.convTitle}>
-                    <span className={styles.neonDot} />
-                    Speak to Your Tutor
-                </h2>
-                <p className={styles.convSubtitle}>
-                    Hold the mic button, ask your question, release — the tutor speaks back!
-                </p>
-            </div>
-
-            {/* Controls */}
-            <div className={styles.convControls}>
-                {!isActive ? (
-                    <button className={styles.btnStart} onClick={startConversation}>
-                        🎙️ Start Conversation
-                    </button>
-                ) : (
-                    <button className={styles.btnEnd} onClick={endConversation}>
-                        ✕ End Conversation
-                    </button>
-                )}
-            </div>
-
-            {/* Chat history */}
-            {messages.length > 0 && (
-                <div className={styles.chatHistory}>
-                    {messages.map((msg, i) => (
-                        <div
-                            key={i}
-                            className={`${styles.bubble} ${msg.role === "user" ? styles.bubbleUser : styles.bubbleTutor}`}
-                        >
-                            <span className={styles.bubbleLabel}>
-                                {msg.role === "user" ? "You" : "🤖 Tutor"}
-                            </span>
-                            <p className={styles.bubbleText}>{msg.text}</p>
-                        </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                </div>
-            )}
-
-            {/* Push-to-talk button */}
-            {isActive && (
-                <div className={styles.pttArea}>
-                    {isTutorSpeaking && (
-                        <div className={styles.speakingIndicator}>
-                            <span className={styles.speakingDot} />
-                            <span className={styles.speakingDot} />
-                            <span className={styles.speakingDot} />
-                            <span className={styles.speakingLabel}>Tutor is speaking…</span>
-                        </div>
-                    )}
-                    {isProcessing && !isTutorSpeaking && (
-                        <div className={styles.thinkingIndicator}>
-                            Thinking<span className={styles.dots}>...</span>
-                        </div>
-                    )}
-                    <button
-                        className={`${styles.pttButton} ${isRecording ? styles.pttRecording : ""} ${(isProcessing || isTutorSpeaking) ? styles.pttDisabled : ""}`}
-                        onPointerDown={startRecording}
-                        onPointerUp={stopRecordingAndSend}
-                        onPointerLeave={stopRecordingAndSend}
-                        disabled={isProcessing || isTutorSpeaking}
-                    >
-                        🎤
-                    </button>
-                    <p className={styles.pttHint}>
-                        {isRecording ? "Release to send" : "Hold to speak"}
+        <section className={styles.shell} aria-label="Voice tutor session">
+            <article className={styles.card}>
+                <header className={styles.cardHeader}>
+                    <div className={styles.badgeRow}>
+                        <span className={styles.badge}>WebRTC</span>
+                        <span className={styles.badge}>Voice</span>
+                    </div>
+                    <h1 className={styles.title}>Voice tutor</h1>
+                    <p className={styles.lead}>
+                        Your microphone streams to the Pipecat pipeline; the tutor replies in real time over the same connection.
                     </p>
-                </div>
-            )}
+                </header>
 
-            {/* Status */}
-            {status && (
-                <div className={styles.statusBar}>
-                    <span>{status}</span>
+                <div
+                    className={`${styles.orbStage} ${isActive ? styles.orbStageLive : ""} ${isConnecting ? styles.orbStageConnecting : ""}`}
+                    aria-hidden
+                >
+                    <div className={styles.orbRing} />
+                    <div className={styles.orbRing2} />
+                    <div className={styles.orbCore}>
+                        {isActive ? (
+                            <span className={styles.waveBars} aria-label="Session active">
+                                <span className={styles.waveBar} />
+                                <span className={styles.waveBar} />
+                                <span className={styles.waveBar} />
+                                <span className={styles.waveBar} />
+                                <span className={styles.waveBar} />
+                            </span>
+                        ) : (
+                            <svg className={styles.micIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
+                                <path
+                                    d="M12 14a3 3 0 003-3V7a3 3 0 10-6 0v4a3 3 0 003 3zm6-3a6 6 0 01-12 0"
+                                    stroke="currentColor"
+                                    strokeWidth="1.75"
+                                    strokeLinecap="round"
+                                />
+                                <path d="M12 19v3M8 22h8" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+                            </svg>
+                        )}
+                    </div>
                 </div>
-            )}
+
+                <p className={styles.stateLine}>
+                    {isActive ? (
+                        <span className={styles.stateLive}>
+                            <span className={styles.pulseDot} />
+                            Session active
+                        </span>
+                    ) : isConnecting ? (
+                        <span className={styles.stateConnecting}>Connecting…</span>
+                    ) : (
+                        <span className={styles.stateIdle}>Ready when you are</span>
+                    )}
+                </p>
+
+                <div className={styles.actions}>
+                    {!isActive ? (
+                        <button type="button" className={styles.btnStart} onClick={startConversation}>
+                            <span className={styles.btnGlow} aria-hidden />
+                            Start session
+                        </button>
+                    ) : (
+                        <button type="button" className={styles.btnEnd} onClick={endConversation}>
+                            End session
+                        </button>
+                    )}
+                </div>
+
+                {status && (
+                    <div
+                        className={`${styles.statusBar} ${isError ? styles.statusError : ""} ${isActive && !isError ? styles.statusOk : ""}`}
+                        role="status"
+                    >
+                        {status}
+                    </div>
+                )}
+
+                <ul className={styles.hints}>
+                    <li>Allow microphone when prompted</li>
+                    <li>Server handles VAD and speech-to-text</li>
+                </ul>
+            </article>
         </section>
     );
 }
