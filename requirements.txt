@@ -2,8 +2,11 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 pydantic>=2.8.0
-numpy>=1.26.0
+numpy>=1.26.0,<2.0
 soundfile>=0.12.1
 scipy>=1.11.0
 faster-whisper
+transformers<4.41
 pipecat-ai[runner,webrtc,whisper,piper]>=0.0.100
+# Pipecat imports websockets.protocol (new layout); websockets<11 only has legacy.protocol
+websockets>=11.0

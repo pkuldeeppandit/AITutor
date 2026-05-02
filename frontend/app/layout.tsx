@@ -2,17 +2,18 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata = {
-  title: "Speech-to-Speech Tutor",
-  description: "Voice in, voice out — WebRTC to local FastAPI / Pipecat"
+  title: "AI Tutor",
+  description: "Improve your skills with real-time voice conversations",
+  icons: {
+    icon: "/Cartoon-Robot.png",
+    apple: "/Cartoon-Robot.png"
+  }
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>
-        <div className="scanlines" aria-hidden />
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

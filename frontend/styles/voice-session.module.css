@@ -1,0 +1,27 @@
+/* Voice session page wrapper inside app shell */
+.voiceAppWrap {
+  min-height: calc(100vh - clamp(40px, 6vw, 72px));
+  margin: 0 auto;
+  padding: clamp(12px, 2vw, 24px) 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.voiceAppWrap::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(0, 229, 255, 0.12), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 60%, rgba(0, 120, 140, 0.1), transparent 45%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.voiceAppWrap > * {
+  position: relative;
+  z-index: 1;
+}

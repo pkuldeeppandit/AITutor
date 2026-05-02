@@ -55,6 +55,20 @@ The pipeline expects Ollama at `http://localhost:11434/v1` and uses the **`mistr
 ollama pull mistral
 ```
 
+Start Ollama in another terminal (keep this running while the app is running):
+
+```bash
+ollama serve
+```
+
+If you see `bind: address already in use`, Ollama is already running on `127.0.0.1:11434`, so you can skip `ollama serve`.
+
+Optional quick check that the model runs:
+
+```bash
+ollama run mistral
+```
+
 To use another model, change `OLLamaLLMService.Settings(model="...")` in `backend/app/bot.py` and pull that tag with Ollama.
 
 ---
@@ -82,6 +96,14 @@ Pure Python (no CLI on `PATH`):
 ```bash
 python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Systran/faster-whisper-base', local_dir='models/faster-whisper-base')"
 ```
+
+Optional quick check that the Whisper base model files exist:
+
+```bash
+ls models/faster-whisper-base/model.bin
+```
+
+Whisper STT is loaded automatically when you run the backend (`python run.py`); there is no separate Whisper server command in this project.
 
 If the folder is missing, `bot.py` still runs: faster-whisper falls back to downloading a small model at runtime. Keeping `models/faster-whisper-base` locally avoids that download and matches the **base** model path in code.
 
@@ -152,6 +174,21 @@ If the UI and API run on different hosts or ports, set `NEXT_PUBLIC_API_BASE` to
 - **“Could not reach backend”** — Start the API on port 8000 and confirm `NEXT_PUBLIC_API_BASE` matches.
 - **Signaling / 500 on `/offer`** — Check the terminal running `run.py` for Pipecat or WebRTC errors; ensure Pipecat extras installed (`pip install -r requirements.txt`).
 - **No speech recognition** — Install `mlx-whisper` on Apple Silicon, or ensure `models/faster-whisper-base` exists and `faster-whisper` installed.
+- **`AttributeError: torch.utils._pytree.register_pytree_node` or NumPy 2.x STT import errors** — Reinstall pinned deps in your active environment, then restart backend:
+
+```bash
+pip install -U "pip<25.1"
+pip install -U -r requirements.txt
+pip install -U "mlx-whisper"   # recommended on Apple Silicon
+python run.py
+```
+
+If you previously installed incompatible versions manually, force-reset the key STT stack:
+
+```bash
+pip uninstall -y numpy transformers faster-whisper ctranslate2 torch
+pip install -U -r requirements.txt
+```
 - **LLM errors** — Run `ollama serve` and verify `ollama pull` for the model name used in `bot.py`.
 - **TTS errors** — Confirm `voices/en_US-amy-medium.onnx` (and Piper dependencies from Pipecat) are present.
 

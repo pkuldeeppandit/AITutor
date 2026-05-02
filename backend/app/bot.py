@@ -16,6 +16,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 # STT — MLX Whisper (Apple Silicon native, no CUDA needed)
 from pipecat.services.whisper.stt import WhisperSTTService, WhisperSTTServiceMLX, MLXModel, Model
+from pipecat.transcriptions.language import Language
 
 # LLM — Ollama
 from pipecat.services.ollama.llm import OLLamaLLMService
@@ -52,11 +53,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             import mlx_whisper  # noqa: F401
 
             stt = WhisperSTTServiceMLX(
-                settings=WhisperSTTServiceMLX.Settings(
-                    model=MLXModel.LARGE_V3_TURBO,   # fast + accurate on Apple Silicon
-                    language="en",
-                    temperature=0.0,
-                ),
+                model=MLXModel.LARGE_V3_TURBO,   # fast + accurate on Apple Silicon
+                language=Language.EN,
+                temperature=0.0,
             )
         except ModuleNotFoundError:
             local_whisper_model_dir = Path("models/faster-whisper-base")
@@ -66,22 +65,20 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
                 else Model.BASE.value
             )
             stt = WhisperSTTService(
-                settings=WhisperSTTService.Settings(
-                    model=whisper_model,
-                    language="en",
-                ),
+                model=whisper_model,
+                language=Language.EN,
             )
 
         # --- LLM: Ollama ---
         # Use "mistral" for speed, "qwen3:30b" for quality
         llm = OLLamaLLMService(
-            settings=OLLamaLLMService.Settings(model="mistral"),
+            model="mistral",
             base_url="http://localhost:11434/v1",
         )
 
         # --- TTS: Piper ---
         tts = PiperTTSService(
-            settings=PiperTTSService.Settings(voice="en_US-amy-medium"),
+            voice_id="en_US-amy-medium",
             download_dir=Path("voices"),
         )
 

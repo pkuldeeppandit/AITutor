@@ -1,13 +1,20 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 
 :root {
-  --bg-dark: #0a0a0a;
-  --bg-charcoal: #0d0d0d;
-  --neon-lime: #a3ff00;
-  --neon-lime-dim: rgba(163, 255, 0, 0.6);
-  --text-white: #ffffff;
-  --text-muted: #808080;
-  --border-subtle: rgba(255, 255, 255, 0.08);
+  --bg-deep: #0a1214;
+  --bg-mid: #0f1a1d;
+  --bg-card: rgba(18, 32, 38, 0.65);
+  --accent: #00e5ff;
+  --accent-hover: #33ebff;
+  --accent-muted: rgba(0, 229, 255, 0.35);
+  --accent-glow: rgba(0, 229, 255, 0.25);
+  --text: #f4f8fa;
+  --text-muted: rgba(244, 248, 250, 0.55);
+  --border-glass: rgba(255, 255, 255, 0.1);
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 999px;
+  --sidebar-w: 260px;
 }
 
 * {
@@ -20,63 +27,66 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Inter', 'Rajdhani', system-ui, sans-serif;
-  background: var(--bg-dark);
-  color: var(--text-white);
+  font-family: "Inter", system-ui, sans-serif;
+  color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -20%, rgba(0, 229, 255, 0.12), transparent 50%),
+    radial-gradient(ellipse 70% 50% at 100% 0%, rgba(0, 120, 140, 0.15), transparent 45%),
+    linear-gradient(165deg, #0a1214 0%, #0d181c 40%, #0a1012 100%);
 }
 
-/* Scanline background */
-.scanlines {
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.15) 2px,
-    rgba(0, 0, 0, 0.15) 4px
-  );
-  pointer-events: none;
-  z-index: 1000;
+body.app-shell-active {
+  background:
+    radial-gradient(ellipse 90% 60% at 10% 0%, rgba(0, 229, 255, 0.06), transparent 50%),
+    linear-gradient(165deg, #0a1214 0%, #0f1a1e 50%, #0a1012 100%);
 }
 
-/* Neon glow */
-.neon-glow {
-  box-shadow: 0 0 20px var(--neon-lime-dim), 0 0 40px rgba(163, 255, 0, 0.2);
+a {
+  color: var(--accent);
+  text-decoration: none;
 }
 
-.neon-glow-hover:hover {
-  box-shadow: 0 0 25px var(--neon-lime-dim), 0 0 50px rgba(163, 255, 0, 0.3);
+a:hover {
+  color: var(--accent-hover);
 }
 
-/* Waveform bars animation */
+/* Waveform / orb helpers used by voice UI */
 @keyframes waveform-pulse {
-  0%, 100% { transform: scaleY(0.3); }
-  50% { transform: scaleY(1); }
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 @keyframes waveform-speak {
-  0%, 100% { transform: scaleY(0.4); }
-  25% { transform: scaleY(0.9); }
-  50% { transform: scaleY(0.6); }
-  75% { transform: scaleY(1); }
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  25% {
+    transform: scaleY(0.9);
+  }
+  50% {
+    transform: scaleY(0.6);
+  }
+  75% {
+    transform: scaleY(1);
+  }
 }
 
 @keyframes bot-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.02); }
-}
-
-@keyframes eye-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-@keyframes blink {
-  0%, 90%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(0.1); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
 }
 
 .bot-speaking .waveform-bar {
